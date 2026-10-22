@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { createIntegrationProxy, createLocalEndpointGuard } from '../tools/integration-proxy.mjs';
+import { createIntegrationProxy, createLocalEndpointGuard, isForbiddenProxyAddress, trustedNetworkControlsEnabled } from '../tools/integration-proxy.mjs';
 
 const upstreamCalls: { url: string; key?: string; auth?: string; body: string }[] = [];
 let upstream: http.Server, proxy: http.Server, base: string, origin: string;
@@ -115,4 +115,88 @@ test('sensitive local endpoints reject public, forwarded, and cross-site request
   let next = false;
   guard({ url: '/__feedback', headers: { host: 'localhost:1420', origin: 'http://localhost:1420' }, socket: { remoteAddress: '127.0.0.1' } }, {}, () => { next = true; });
   assert.equal(next, true);
+});
+
+test('trusted-network controls stay available on a private install and closed on Railway', () => {
+  assert.equal(trustedNetworkControlsEnabled({}), false);
+  assert.equal(trustedNetworkControlsEnabled({ HALCYON_TRUSTED_NETWORK_CONTROLS: '1' }), true);
+  assert.equal(trustedNetworkControlsEnabled({ HALCYON_TRUSTED_NETWORK_CONTROLS: '1', RAILWAY_ENVIRONMENT: 'production' }), false);
+  assert.equal(trustedNetworkControlsEnabled({
+    HALCYON_TRUSTED_NETWORK_CONTROLS: '1',
+    HALCYON_PUBLIC_SITE: '1',
+    HALCYON_ALLOW_TRUSTED_NETWORK_CONTROLS: '1',
+  }), true);
+
+  const closed = createLocalEndpointGuard({ HALCYON_TRUSTED_NETWORK_CONTROLS: '1', RAILWAY_ENVIRONMENT: 'production' });
+  let next = false;
+  const res = { statusCode: 0, setHeader() {}, end() {} };
+  closed({ url: '/__remote/status', headers: { host: 'app.up.railway.app', 'x-forwarded-for': '203.0.113.4' }, socket: { remoteAddress: '10.0.0.8' } }, res, () => { next = true; });
+  assert.equal(next, false);
+  assert.equal(res.statusCode, 403);
+
+  const open = createLocalEndpointGuard({ HALCYON_TRUSTED_NETWORK_CONTROLS: '1' });
+  let allowed = false;
+  open({ url: '/__play', headers: { host: 'lan.example' }, socket: { remoteAddress: '192.168.1.20' } }, {}, () => { allowed = true; });
+  assert.equal(allowed, true);
+});
+
+test('link-local, metadata, and rebinding targets are not fetched', async () => {
+  assert.equal(isForbiddenProxyAddress('169.254.169.254', { blockPrivate: false }), true);
+  assert.equal(isForbiddenProxyAddress('2130706433', { blockPrivate: false }), true);
+  assert.equal(isForbiddenProxyAddress('metadata.google.internal', { blockPrivate: false }), true);
+  assert.equal(isForbiddenProxyAddress('127.0.0.1', { blockPrivate: false }), false);
+  assert.equal(isForbiddenProxyAddress('127.0.0.1', { blockPrivate: true }), true);
+  assert.equal(isForbiddenProxyAddress('10.1.1.1', { blockPrivate: true }), true);
+  assert.equal(isForbiddenProxyAddress('10.1.1.1', { blockPrivate: false }), false);
+
+  const calls: string[] = [];
+  const middleware = createIntegrationProxy(
+    { jellyseerr: { url: 'http://catalog.example/seerr', apiKey: 'SERVER-ONLY-SECRET' } },
+    {
+      env: {},
+      fetchImpl: async () => { calls.push('fetch'); return new Response('{}', { headers: { 'content-type': 'application/json' } }); },
+      lookupImpl: async () => [{ address: '169.254.169.254', family: 4 }],
+    },
+  );
+  const server = http.createServer((req, res) => middleware(req, res, () => { res.writeHead(404); res.end(); }));
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', () => resolve()));
+  const port = (server.address() as any).port;
+  try {
+    const rebound = await fetch(`http://127.0.0.1:${port}/dev-proxy`, {
+      headers: { 'x-proxy-target': 'http://catalog.example/seerr/api/v1/movie/1' },
+    });
+    assert.equal(rebound.status, 403);
+    assert.equal((await rebound.text()).includes('SERVER-ONLY-SECRET'), false);
+    assert.equal(calls.length, 0);
+
+    const metadata = await fetch(`http://127.0.0.1:${port}/dev-proxy`, {
+      headers: { 'x-proxy-target': 'http://169.254.169.254/latest/meta-data/' },
+    });
+    assert.equal(metadata.status, 403);
+    await metadata.text();
+    assert.equal(calls.length, 0);
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+});
+
+test('a public site will not proxy to loopback even when that URL is configured', async () => {
+  const before = upstreamCalls.length;
+  const middleware = createIntegrationProxy(
+    { jellyseerr: { url: base + '/seerr', apiKey: secret } },
+    { env: { RAILWAY_ENVIRONMENT: 'production' } },
+  );
+  const server = http.createServer((req, res) => middleware(req, res, () => { res.writeHead(404); res.end(); }));
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', () => resolve()));
+  const port = (server.address() as any).port;
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/dev-proxy`, {
+      headers: { 'x-proxy-target': base + '/seerr/api/v1/movie/1' },
+    });
+    assert.equal(response.status, 403);
+    assert.equal((await response.text()).includes(secret), false);
+    assert.equal(upstreamCalls.length, before);
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
 });

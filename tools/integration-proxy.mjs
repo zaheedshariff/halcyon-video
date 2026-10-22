@@ -1,8 +1,11 @@
 // Server-only integration boundary. All destinations come from operator config;
 // browser CORS and Host checks are not authentication or proxy authorization.
+import { lookup as dnsLookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
 import { operatorServiceForTarget, operatorRequestAllowed, operatorAuthHeaders, targetBelongsTo } from '../src/operator-defaults.ts';
 
 import { SeerrIdentityError, seerrUserHeaders } from './seerr-user-auth.mjs';
+import { isPublicSite } from './public-host.mjs';
 
 const MAX_BODY = 64 * 1024;
 const MAX_RESPONSE = 8 * 1024 * 1024;
@@ -41,7 +44,89 @@ async function readBounded(stream, max) {
   }
   return Buffer.concat(chunks);
 }
-export function createIntegrationProxy(config, { fetchImpl = fetch, env = process.env } = {}) {
+const METADATA_HOSTS = new Set([
+  'metadata.google.internal',
+  'metadata.google.com',
+  'metadata.internal',
+  'metadata',
+  'instance-data',
+]);
+
+export function proxyBlocksPrivateNetworks(env = process.env) {
+  return env.HALCYON_PROXY_BLOCK_PRIVATE === '1' || isPublicSite(env);
+}
+
+function bareHost(hostname) {
+  let host = String(hostname || '').trim().toLowerCase().replace(/\.$/, '');
+  if (host.startsWith('[') && host.endsWith(']')) host = host.slice(1, -1);
+  const zone = host.indexOf('%');
+  if (zone !== -1) host = host.slice(0, zone);
+  return host;
+}
+
+function forbiddenV4(ip, blockPrivate) {
+  const parts = ip.split('.').map(Number);
+  if (parts.length !== 4 || parts.some(part => !Number.isInteger(part) || part < 0 || part > 255)) return true;
+  const [a, b] = parts;
+  // Unspecified and link-local, including the cloud metadata address.
+  if (a === 0 || (a === 169 && b === 254)) return true;
+  if (!blockPrivate) return false;
+  if (a === 10 || a === 127) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 100 && b >= 64 && b <= 127) return true;
+  return false;
+}
+
+function forbiddenV6(ip, blockPrivate) {
+  const normalized = ip.toLowerCase();
+  if (normalized === '::' || /^fe[89ab][0-9a-f]:/.test(normalized)) return true;
+  if (normalized.startsWith('::ffff:')) {
+    const v4 = normalized.slice('::ffff:'.length);
+    if (isIP(v4) === 4) return forbiddenV4(v4, blockPrivate);
+  }
+  if (!blockPrivate) return false;
+  if (normalized === '::1') return true;
+  if (/^f[cd][0-9a-f]{2}:/.test(normalized)) return true;
+  return false;
+}
+
+/** Literal addresses this proxy must never dial, even if an operator listed them. */
+export function isForbiddenProxyAddress(hostname, { blockPrivate = false } = {}) {
+  const host = bareHost(hostname);
+  if (!host) return true;
+  if (METADATA_HOSTS.has(host) || host.endsWith('.metadata.google.internal')) return true;
+  // Decimal and hex IP spellings, and octal dotted quads, are not hostnames.
+  if (/^\d+$/.test(host) || /^0x[0-9a-f]+$/i.test(host)) return true;
+  if (host.split('.').some(part => /^0\d+$/.test(part))) return true;
+  const mapped = host.startsWith('::ffff:') ? host.slice('::ffff:'.length) : host;
+  if (isIP(mapped) === 4) return forbiddenV4(mapped, blockPrivate);
+  if (isIP(host) === 6) return forbiddenV6(host, blockPrivate);
+  return false;
+}
+
+/**
+ * An allowlisted name can still be an SSRF hole if it resolves to link-local,
+ * metadata, or (on a public site) loopback and private ranges. Checked again
+ * at dial time; redirects are already refused.
+ */
+export async function resolvesToForbidden(hostname, env = process.env, lookupImpl = dnsLookup) {
+  const host = bareHost(hostname);
+  const blockPrivate = proxyBlocksPrivateNetworks(env);
+  if (isForbiddenProxyAddress(host, { blockPrivate })) return true;
+  if (isIP(host)) return false;
+  let records;
+  try {
+    records = await lookupImpl(host, { all: true, verbatim: true });
+  } catch {
+    return blockPrivate;
+  }
+  const list = Array.isArray(records) ? records : [records];
+  if (!list.length) return blockPrivate;
+  return list.some(record => isForbiddenProxyAddress(record?.address, { blockPrivate }));
+}
+
+export function createIntegrationProxy(config, { fetchImpl = fetch, env = process.env, lookupImpl = dnsLookup } = {}) {
   const extra = (env.HALCYON_PROXY_ALLOWED_URLS || '').split(',').map(x => x.trim()).filter(Boolean);
   let active = 0;
   return async (req, res, next) => {
@@ -53,9 +138,15 @@ export function createIntegrationProxy(config, { fetchImpl = fetch, env = proces
       u = new URL(target);
       if (!['http:', 'https:'].includes(u.protocol) || u.username || u.password || u.hash || /[%\\]/.test(u.pathname)) throw 0;
     } catch { return json(res, 400, { error: 'Invalid proxy target' }); }
+    if (isForbiddenProxyAddress(u.hostname, { blockPrivate: proxyBlocksPrivateNetworks(env) })) {
+      return json(res, 403, { error: 'Destination is not allowed' });
+    }
     const service = operatorServiceForTarget(config, target);
     const base = service ? config[service].url : extra.find(url => targetBelongsTo(target, url));
     if (!base) return json(res, 403, { error: 'Destination is not configured by this server operator' });
+    if (await resolvesToForbidden(u.hostname, env, lookupImpl)) {
+      return json(res, 403, { error: 'Destination is not allowed' });
+    }
     const method = String(req.method || 'GET').toUpperCase();
     const ownAuth = !!(req.headers['x-api-key'] || req.headers.authorization);
     const kind = service || (u.pathname.includes('/api/v1/') ? 'jellyseerr' : 'romm');
@@ -122,20 +213,29 @@ export function createIntegrationProxy(config, { fetchImpl = fetch, env = proces
     } finally { active--; }
   };
 }
-export function integrationProxyPlugin(config) {
-  const handler = createIntegrationProxy(config);
+export function integrationProxyPlugin(config, env = process.env) {
+  const handler = createIntegrationProxy(config, { env });
   return { name: 'integration-proxy', configureServer(s) { s.middlewares.use(handler); },
     configurePreviewServer(s) { s.middlewares.use(handler); } };
 }
 
 // Playback control, feedback files and seeded Remote Play were unintentionally
 // exposed by public reverse proxies. Default to direct loopback access only.
+// A public host (Railway, or HALCYON_PUBLIC_SITE=1) keeps them closed even if
+// HALCYON_TRUSTED_NETWORK_CONTROLS=1. Opening them there also requires
+// HALCYON_ALLOW_TRUSTED_NETWORK_CONTROLS=1, which a friends site should not set.
+export function trustedNetworkControlsEnabled(env = process.env) {
+  if (env.HALCYON_TRUSTED_NETWORK_CONTROLS !== '1') return false;
+  if (isPublicSite(env) && env.HALCYON_ALLOW_TRUSTED_NETWORK_CONTROLS !== '1') return false;
+  return true;
+}
+
 export function createLocalEndpointGuard(env = process.env) {
   return (req, res, next) => {
     const pathname = (req.url || '').split('?')[0];
     if (!/^\/__(?:play|feedback|remote)/.test(pathname)) return next();
     if (!sameSite(req)) return json(res, 403, { error: 'Cross-site request denied' });
-    if (env.HALCYON_TRUSTED_NETWORK_CONTROLS === '1') return next();
+    if (trustedNetworkControlsEnabled(env)) return next();
     const peer = req.socket?.remoteAddress;
     let host;
     try { host = new URL(`http://${req.headers.host}`).hostname; } catch { host = ''; }
@@ -145,8 +245,13 @@ export function createLocalEndpointGuard(env = process.env) {
     return json(res, 403, { error: 'Local controls require direct loopback access' });
   };
 }
-export function localEndpointGuardPlugin() {
-  const handler = createLocalEndpointGuard();
+export function localEndpointGuardPlugin(env = process.env) {
+  if (env.HALCYON_TRUSTED_NETWORK_CONTROLS === '1' && !trustedNetworkControlsEnabled(env)) {
+    console.warn('[local-controls] HALCYON_TRUSTED_NETWORK_CONTROLS is set, but this is a public site. Playback, feedback, and Remote Play stay closed.');
+  } else if (trustedNetworkControlsEnabled(env)) {
+    console.warn('[local-controls] Trusted-network controls are ON. Do not expose this server to the public internet.');
+  }
+  const handler = createLocalEndpointGuard(env);
   return { name: 'local-control-boundary', configureServer(s) { s.middlewares.use(handler); },
     configurePreviewServer(s) { s.middlewares.use(handler); } };
 }
