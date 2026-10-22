@@ -31,6 +31,7 @@ test('the Railway deploy files lock the public site and probe a quiet health rou
   const dockerfile = readFileSync(new URL('../Dockerfile.railway', import.meta.url), 'utf8');
   assert.match(railway, /"healthcheckPath": "\/healthz"/);
   assert.match(railway, /Dockerfile\.railway/);
+  assert.match(dockerfile, /npm ci --include=dev/);
   assert.match(dockerfile, /HALCYON_PUBLIC_SITE=1/);
   assert.match(dockerfile, /\/healthz/);
   assert.match(dockerfile, /tools\/serve-public\.mjs/);
