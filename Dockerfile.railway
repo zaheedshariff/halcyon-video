@@ -18,7 +18,10 @@ ENV PUPPETEER_SKIP_DOWNLOAD=1 \
     NODE_ENV=production
 
 COPY package.json package-lock.json ./
-RUN npm ci && npm cache clean --force
+# NODE_ENV=production makes plain `npm ci` skip devDependencies. The build
+# needs them (typescript, esbuild, vite), and the running server imports vite
+# from tools/serve-public.mjs, so they stay in the image.
+RUN npm ci --include=dev && npm cache clean --force
 
 COPY . .
 
