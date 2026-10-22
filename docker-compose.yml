@@ -20,6 +20,14 @@ services:
     #   - "1420:1420"
 
     environment:
+      # Friends-only door for a public URL. Leave unset on a home kiosk.
+      # The password stays in this environment — never in a VITE_* variable.
+      # See DEPLOY-RAILWAY.md. HALCYON_PUBLIC_SITE=1 locks the store until a
+      # password of at least 8 characters is set.
+      # HALCYON_SITE_PASSWORD: replace-with-a-long-passphrase
+      # HALCYON_SITE_FRIENDS: Sam:their-own-passphrase,Riley:another-passphrase
+      # HALCYON_TRUSTED_NETWORK_CONTROLS stays unset. Do not enable it on a
+      # public host; playback, feedback, and Remote Play have no user login.
       # Steam deliberately has no container flag, privileged sidecar, socket,
       # or credential mount. A user who enables Steam pairs this browser with
       # the optional companion on the computer that will run the game.

@@ -411,6 +411,23 @@ Thank you to [Gibbeth (t-nician)](https://github.com/t-nician) for privately
 reporting the unauthenticated requests, response-data exposure, and unrestricted
 proxy destination issues that led to this security update.
 
+### Friends-only site on Railway
+
+The public image (`Dockerfile.railway`) puts a membership desk in front of the
+whole store and every server route. Set `HALCYON_SITE_PASSWORD` (and optionally
+`HALCYON_SITE_FRIENDS`) on the server. Those names are not `VITE_` variables,
+so they are not copied into the browser bundle. Each friend still links their
+own Plex account at plex.tv/link after they are in. Playback control, feedback
+storage, and Remote Play stay loopback-only, and a public host keeps
+`HALCYON_TRUSTED_NETWORK_CONTROLS` from opening them. See
+[DEPLOY-RAILWAY.md](DEPLOY-RAILWAY.md) for the Railway setup, the env vars, and
+how to share Plex libraries and turn on Remote Access.
+
+A normal local `npm run dev` does not ask for that password. `npm run serve`
+and the Railway image do as soon as a password is set or
+`HALCYON_PUBLIC_SITE=1` (the Railway image sets it). With the flag and no
+usable password, the store stays locked instead of being published open.
+
 ## Updating
 
 | Installation | Update command |

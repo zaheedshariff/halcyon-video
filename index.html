@@ -43,6 +43,20 @@
   </head>
 
   <body>
+    <a id="membership-leave" href="/logout" hidden>Leave the store</a>
+    <script>
+      // Shown only after the server-side membership door has signed this
+      // browser in. The cookie itself is httpOnly, so the page asks.
+      fetch('/__halcyon/session', { headers: { accept: 'application/json' } })
+        .then(function (res) { return res.ok ? res.json() : null; })
+        .then(function (info) {
+          if (info && info.authenticated) {
+            var link = document.getElementById('membership-leave');
+            if (link) link.hidden = false;
+          }
+        })
+        .catch(function () {});
+    </script>
     <!-- The house emblem, defined once and stamped everywhere else via
          <use href="#bb-ticket-logo"/> (boot overlay, genre menu, login
          overlay, screensaver disc face). The id is historical and load-

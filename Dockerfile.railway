@@ -1,0 +1,38 @@
+# Friends-only Halcyon for Railway (and any other public host).
+#
+# This image does not install Chromium or a TURN server. Friends render the
+# store in their own browsers and link their own Plex accounts. Playback
+# control, feedback files, and Remote Play stay closed.
+#
+#   railway up
+# or connect this repo in the Railway dashboard. railway.json points here.
+#
+# HALCYON_PUBLIC_SITE=1 locks the store until HALCYON_SITE_PASSWORD (or
+# HALCYON_SITE_FRIENDS) is set. See DEPLOY-RAILWAY.md.
+
+FROM node:22-alpine
+WORKDIR /app
+
+ENV PUPPETEER_SKIP_DOWNLOAD=1 \
+    HALCYON_PUBLIC_SITE=1 \
+    NODE_ENV=production
+
+COPY package.json package-lock.json ./
+RUN npm ci && npm cache clean --force
+
+COPY . .
+
+# A VITE_ credential present at build time is copied into the JavaScript
+# everyone downloads. Refuse the image instead of shipping that.
+RUN if [ -n "${VITE_JELLYFIN_PASSWORD}${VITE_JELLYFIN_USERNAME}${VITE_JELLYFIN_APIKEY}${VITE_PLEX_TOKEN}${VITE_PLEX_PASSWORD}${VITE_JELLYSEERR_APIKEY}${VITE_ROMM_APIKEY}${VITE_SITE_PASSWORD}" ]; then \
+      echo "Refusing to build: VITE_* secrets would be embedded in the client bundle. Use HALCYON_* runtime variables." >&2; \
+      exit 1; \
+    fi \
+    && npm run build
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \
+  CMD node -e "const p=process.env.PORT||8080;fetch('http://127.0.0.1:'+p+'/healthz').then(r=>r.text()).then(t=>{if(!t.startsWith('ok'))process.exit(1)}).catch(()=>process.exit(1))"
+
+CMD ["node", "tools/serve-public.mjs"]

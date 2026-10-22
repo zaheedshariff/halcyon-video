@@ -61,7 +61,9 @@ RUN npm run build
 
 EXPOSE 1420
 
+# /healthz returns the text "ok" and nothing about the store, the session,
+# or configured services. PORT is honored when set (Railway); 1420 otherwise.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s \
-  CMD wget -qO /dev/null http://127.0.0.1:1420/ || exit 1
+  CMD node -e "const p=process.env.PORT||1420;fetch('http://127.0.0.1:'+p+'/healthz').then(r=>r.text()).then(t=>{if(!t.startsWith('ok'))process.exit(1)}).catch(()=>process.exit(1))"
 
 CMD ["npm", "run", "serve"]

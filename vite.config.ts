@@ -23,6 +23,10 @@ import {
 
 // @ts-expect-error plain-js server middleware
 import { integrationProxyPlugin, localEndpointGuardPlugin } from "./tools/integration-proxy.mjs";
+// @ts-expect-error plain-js membership door
+import { siteGatePlugin } from "./tools/site-gate.mjs";
+// @ts-expect-error plain-js public-host helper
+import { isHealthPath, resolveAllowedHosts } from "./tools/public-host.mjs";
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
@@ -108,19 +112,14 @@ function ownHostNames(): string[] {
 // above, so a `docker run -e ...` line configures the lot.
 // @ts-expect-error process is a nodejs global
 const envFromFiles = loadEnv(process.env.NODE_ENV || "development", process.cwd(), "");
+// Real process env wins over files. HALCYON_* values stay in this Node
+// process; Vite still exposes only VITE_* keys to the browser bundle.
 // @ts-expect-error process is a nodejs global
-const operatorEnv = readOperatorEnv({ ...envFromFiles, ...process.env });
+const runtimeEnv = { ...envFromFiles, ...process.env };
+const operatorEnv = readOperatorEnv(runtimeEnv);
 const operatorPublic = publicOperatorDefaults(operatorEnv);
 
-// @ts-expect-error process is a nodejs global
-const configuredHosts: string[] = (process.env.HALCYON_ALLOWED_HOSTS ?? "")
-  .split(",")
-  .map((h: string) => h.trim())
-  .filter(Boolean);
-
-const allowedHosts: string[] | true = configuredHosts.includes("all")
-  ? true
-  : [...ownHostNames(), ...configuredHosts];
+const allowedHosts: string[] | true = resolveAllowedHosts(runtimeEnv, ownHostNames());
 // @ts-expect-error import.meta.dirname is a nodejs (>=21.2) global
 const feedbackDir = path.join(import.meta.dirname, "feedback");
 const MAX_FEEDBACK_BODY_BYTES = 20 * 1024 * 1024; // ~20MB: a full-res PNG dataURL + note text
@@ -481,6 +480,9 @@ function hostGuardPlugin() {
       // Mirror vite: no check when it is disabled outright, or under https —
       // a rebinding attacker cannot present a valid cert for the name it takes.
       if (opts.allowedHosts === true || opts.https) return next();
+      // The health check answers "ok" and nothing else, including when a
+      // platform probe sends a Host header we have not listed yet.
+      if (isHealthPath(req.url)) return next();
       if (isHostAllowed(opts.allowedHosts ?? [], req.headers.host)) return next();
 
       // Echoed into a text/plain body, so the only real concern is a header
@@ -566,11 +568,14 @@ export default defineConfig(async () => ({
     buildSourcePlugin(import.meta.dirname),
     // First: everything below it answers only to an allowed Host header.
     hostGuardPlugin(),
-    localEndpointGuardPlugin(),
+    // Before every other route: a public site serves the membership door,
+    // not the store, until the session cookie checks out.
+    siteGatePlugin(runtimeEnv),
+    localEndpointGuardPlugin(runtimeEnv),
     clientErrorRelayPlugin(),
     feedbackPinPlugin(),
     mpvPlayerPlugin(),
-    integrationProxyPlugin(operatorEnv),
+    integrationProxyPlugin(operatorEnv, runtimeEnv),
     operatorConfigPlugin(),
     remotePlayPlugin(),
   ],
