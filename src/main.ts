@@ -13,10 +13,12 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { measureDisplayHz } from './display-hz';
 import { keyboardOwnedByControl, textEntryHasFocus, hasReachableFocusedControl } from './text-entry-focus';
 import { installDebugLog, debugLogPath } from './debug-log';
+import { dismissOverviewWalkHint, installDesktopCursor, noteStoreMode } from './desktop-cursor';
 
 // Before anything else that might fail: a packaged build has no devtools and
 // no stdout, so without this every console line is written to nowhere.
 installDebugLog();
+installDesktopCursor();
 
 // Sample the compositor's real refresh rate while the boot overlay is up, so
 // the dynamic resolution scaler chases 120fps on a 120Hz display instead of
@@ -2713,6 +2715,7 @@ async function initializeStoreScene(preservePosterCache = false) {
 
     // Wire up state machine callbacks
     scene.onModeChange = (mode) => {
+      noteStoreMode(mode);
       logToConsole(`[System] Mode changed to: ${mode}`, 'system');
       // Set the generic per-mode hint first; for browse/inspect,
       // updateMovieHUD() below immediately refines it with movie-specific
@@ -2722,6 +2725,7 @@ async function initializeStoreScene(preservePosterCache = false) {
         updateMovieHUD(storeScene?.getSelectedMovie() || null);
       }
     };
+    noteStoreMode(scene.mode);
 
     // Left at the checkout counter reaches for the clerk's terminal.
     scene.onCounterTerminal = () => openCounterTerminal();
@@ -4237,6 +4241,7 @@ async function main() {
       // could bring the camera back to the terminal. Same trap at the manager
       // terminal. isAnyOverlayOpen covers all of them, plus the old four.
       if (!shortcutsAllowed() || (mobileStoreActive() && storeScene?.isWalkAroundMode)) return;
+      dismissOverviewWalkHint();
       storeScene?.toggleWalkAround();
     },
     // T22: carry-mode shortcuts. Both are guarded no-ops with the 'Carry &

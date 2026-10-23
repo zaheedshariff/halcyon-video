@@ -14,6 +14,6 @@
 }
 /* Keep menus, touch navigation and in-scene cursors available throughout a take.
    Only the recorder panel and walking/flight chrome leave the composition. */
-body.reel-recording :is(#reel-controls, #walk-hud, #walk-crosshair, #whiteout-overlay, #store-touch-walk, #store-touch-stick),
+body.reel-recording :is(#reel-controls, #walk-hud, #walk-crosshair, #walk-look-hint, #overview-walk-hint, #whiteout-overlay, #store-touch-walk, #store-touch-stick),
 body.reel-recording :is(#reel-controls, #walk-hud, #store-touch-stick) * { visibility: hidden !important; }
 body.reel-recording canvas[data-reel-canvas] { cursor: none !important; }

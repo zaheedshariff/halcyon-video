@@ -5689,12 +5689,12 @@ export class StoreScene {
   // clientX/Y freeze, so tap-vs-drag detection in walk mode must count
   // movementX/Y instead (see handleWalkMouseMove).
   private walkPressDragPx = 0;
-  // Whether the pointer was ALREADY locked when the current press began.
-  // Pointer lock is requested on pointerdown and usually engages before the
-  // matching pointerup, so a press that STARTED unlocked must aim its click
-  // at the press's screen point (where the visible cursor was when the user
-  // committed the click), not at the view-center crosshair they couldn't see.
+  // Whether the pointer was already locked when this press began. The press
+  // that captures the mouse does not inspect; a press that started locked
+  // aims at the crosshair (clientX/Y freeze once the lock engages).
   public walkPressStartedLocked = false;
+  // The press that captures the mouse. It looks around; it does not inspect.
+  public walkPressForLock = false;
 
   private onPointerDown = (e: PointerEvent) => {
     this.requestRender();
@@ -5712,10 +5712,10 @@ export class StoreScene {
 
     if (this.isWalkAroundMode) {
       this.isDragging = true;
-      // Re-engage the lock if it isn't held (first click after an Escape, or
-      // a browser that refused the F-key request) — clicking is the classic
-      // FPS "capture my mouse" gesture.
-      if (!this.isPointerLocked) this.requestWalkPointerLock();
+      // F does not capture the mouse. A click inside this view does, and that
+      // click is only the lock gesture — it must not also inspect a case.
+      this.walkPressForLock = !this.isPointerLocked;
+      if (this.walkPressForLock) this.requestWalkPointerLock();
     }
   };
 
@@ -5732,6 +5732,10 @@ export class StoreScene {
     this.isDragging = false;
 
     if (this.isWalkAroundMode) {
+      if (this.walkPressForLock) {
+        this.walkPressForLock = false;
+        return;
+      }
       // A press with no real look-drag is a CLICK on whatever's under the
       // crosshair/cursor — pick it up without leaving your feet. Movement is
       // the ONLY discriminator (no press-duration cutoff): mouse-look always
@@ -5757,7 +5761,7 @@ export class StoreScene {
   };
 
   private onPointerCancel = (_e: PointerEvent) => {
-    this.requestRender(); this.isDragging = false; this.pointerStartTime = 0; this.walkPressDragPx = 0;
+    this.requestRender(); this.isDragging = false; this.pointerStartTime = 0; this.walkPressDragPx = 0; this.walkPressForLock = false;
   };
 
   // How far (ft) a walk-mode click can reach. Roughly "a case you could lean
@@ -6135,6 +6139,9 @@ export class StoreScene {
 
   private handlePointerLockChange = () => {
     this.isPointerLocked = document.pointerLockElement === this.renderer.domElement;
+    // Esc releases the lock without a key event. Bring the hint and the
+    // system cursor back; leaving walk mode does the same via updateWalkHUD.
+    this.updateWalkHUD();
   };
 
   private handleWalkMouseMove = (e: MouseEvent) => {

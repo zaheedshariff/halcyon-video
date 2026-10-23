@@ -123,9 +123,9 @@ export function createEmblemCanvas(session: EmblemSession, host: HTMLElement): E
   let drag: Drag | null = null;
   let shiftHeld = false;
 
-  // The store's global ten-foot `cursor: none !important` — and the studio's
-  // own visible-arrow carve-out in styles.css — both outrank a plain inline
-  // style, so the live grab/resize cursor must be inline AND important.
+  // body.console-cursor and the studio's visible-arrow carve-out both outrank
+  // a plain inline style, so the live grab/resize cursor must be inline AND
+  // important.
   const setCursor = (v: string) => canvas.style.setProperty('cursor', v, 'important');
 
   // ── Geometry ───────────────────────────────────────────────────────────────

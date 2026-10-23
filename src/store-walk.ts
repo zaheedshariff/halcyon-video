@@ -16,6 +16,7 @@ import { retailAudio } from './audio';
 import { takeTapeIntoCarry } from './store-checkout';
 import type { StoreScene } from './three-scene';
 import { showClerkToast } from './carried-tapes';
+import { syncWalkLookHint } from './desktop-cursor';
 
 // Max reach (ft) for walk-mode click interactions — beyond this a raycast
 // hit is out of arm's-plus-a-step range and the click is ignored.
@@ -297,8 +298,10 @@ export function updateWalkHUD(scene: StoreScene) {
   // walk: no key legend, no aim dot.
   const on = scene.isWalkAroundMode && !scene.attractTour;
   document.getElementById('walk-hud')?.classList.toggle('visible', on);
-  // Aim dot for click-to-pick-up (the pointer-locked cursor is invisible).
+  // Aim dot for click-to-pick-up. It stays up for the whole walk, including
+  // before the mouse is captured (the OS cursor is still visible then).
   document.getElementById('walk-crosshair')?.classList.toggle('visible', on);
+  syncWalkLookHint(scene);
 }
 
 export function toggleWalkAround(scene: StoreScene) {
@@ -376,13 +379,11 @@ export function toggleWalkAround(scene: StoreScene) {
       scene.walkKeys[key as keyof typeof scene.walkKeys] = false;
     });
 
-    // Capture the mouse right away — the F keypress (or gamepad button)
-    // that toggled walk mode counts as user activation, so the lock can
-    // engage without waiting for a click. If the browser refuses (e.g. a
-    // programmatic toggle from the harness), mouse-look still works off
-    // movement deltas and the first click re-requests the lock.
-    scene.requestWalkPointerLock();
-
+    // Don't capture the mouse on the key or button that entered walk mode.
+    // The cursor stays visible and a hint asks for a click inside the 3D
+    // view (three-scene.ts onPointerDown). Esc releases the lock; leaving
+    // walk mode does too, below. Mouse-look still works off movement deltas
+    // if the browser refuses the click's lock request.
     scene.lastUpdateTime = performance.now();
     scene.updateWalkHUD();
     scene.onConsoleLog("[System] Walk Mode activated. Press WASD to walk, Arrows/Mouse to look.", "system");

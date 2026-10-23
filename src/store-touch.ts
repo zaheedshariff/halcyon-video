@@ -185,7 +185,7 @@ body .clerk-prompt { bottom: max(174px, calc(env(safe-area-inset-bottom) + 160px
 body .clerk-prompt .clerk-key { display: none; }
 body:has(.clerk-dialog.visible) #store-touch-controls,
 body:has(.clerk-dialog.visible) #browse-hint { visibility: hidden; }
-#walk-hud.visible, #walk-crosshair.visible { display: none; }
+#walk-hud.visible, #walk-crosshair.visible, #walk-look-hint, #overview-walk-hint { display: none; }
 body:has(#store-touch-controls[data-mode="inspect"]) #browse-locator { display: none; }
 #browse-locator { top: max(86px, calc(env(safe-area-inset-top) + 72px)); max-width: calc(100vw - 48px); }
 .browse-locator-name { white-space: normal; text-align: center; font-size: 18px; letter-spacing: 1px; }
