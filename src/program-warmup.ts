@@ -87,7 +87,23 @@ export async function compileProgramsInStages(
         view.children = [];
         return view;
       });
-      renderer.compile(batch, camera, scene);
+      // Three's compiler frustum-culls this batch against the camera. The
+      // full-room pass was skipping every mesh outside the overview, so the
+      // first walk frames compiled those programs and uploaded their maps on
+      // the spot. Restore culling before the next frame, including when
+      // compile throws.
+      const restoreCull: THREE.Object3D[] = [];
+      for (const object of batch.children) {
+        if (object.frustumCulled) {
+          object.frustumCulled = false;
+          restoreCull.push(object);
+        }
+      }
+      try {
+        renderer.compile(batch, camera, scene);
+      } finally {
+        for (const object of restoreCull) object.frustumCulled = true;
+      }
       submitted = Math.min(objects.length, i + batchSize);
       progress?.((extension ? .5 : .9) * submitted / objects.length, `Preparing materials · ${Math.min(i + batchSize, objects.length)} of ${objects.length}`);
     } finally {

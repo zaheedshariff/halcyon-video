@@ -76,6 +76,43 @@ test('failed compiler restores renderer state', async () => {
   await assert.rejects(f.run(), /compile failed/); f.checkRestored();
 });
 
+test('off-camera meshes are compiled and culling is restored', async () => {
+  const f = fixture();
+  const mesh = f.scene.children[0] as THREE.Mesh;
+  const compile = f.renderer.compile;
+  f.renderer.compile = (batch: THREE.Group, view: THREE.Camera, lighting: THREE.Scene) => {
+    assert.equal(batch.children[0].frustumCulled, false);
+    compile(batch, view, lighting);
+  };
+  await f.run();
+  assert.equal(mesh.frustumCulled, true);
+});
+
+test('a thrown compile restores frustum culling', async () => {
+  const f = fixture();
+  const mesh = f.scene.children[0] as THREE.Mesh;
+  f.renderer.compile = () => {
+    assert.equal(mesh.frustumCulled, false);
+    throw new Error('compile failed');
+  };
+  await assert.rejects(f.run(), /compile failed/);
+  assert.equal(mesh.frustumCulled, true);
+  f.checkRestored();
+});
+
+test('a parented mesh is compiled through a view and keeps its own culling flag', async () => {
+  const f = fixture();
+  const mesh = f.scene.children[0] as THREE.Mesh;
+  mesh.add(new THREE.Object3D());
+  f.renderer.compile = (batch: THREE.Group) => {
+    assert.notEqual(batch.children[0], mesh);
+    assert.equal(batch.children[0].frustumCulled, false);
+    assert.equal(mesh.frustumCulled, true);
+  };
+  await f.run();
+  assert.equal(mesh.frustumCulled, true);
+});
+
 test('hidden-page work remains suspended and can be cancelled', async () => {
   const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'document');
   Object.defineProperty(globalThis, 'document', { configurable: true, value: { hidden: true } });

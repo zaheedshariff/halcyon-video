@@ -17,6 +17,7 @@ import { takeTapeIntoCarry } from './store-checkout';
 import type { StoreScene } from './three-scene';
 import { showClerkToast } from './carried-tapes';
 import { syncWalkLookHint } from './desktop-cursor';
+import { WALK_ENTRY_LOOK, WALK_ENTRY_POSITION } from './walk-entry-warmup';
 
 // Max reach (ft) for walk-mode click interactions — beyond this a raycast
 // hit is out of arm's-plus-a-step range and the click is ignored.
@@ -348,8 +349,8 @@ export function toggleWalkAround(scene: StoreScene) {
     // entries begin in the entrance chamber, looking toward the shop floor.
     if (!mobileStoreActive() || scene.savedModeBeforeWalk !== 'browse') {
       if (mobileStoreActive()) scene.currentCameraPos.copy(OVERVIEW_POS);
-      else scene.currentCameraPos.set(13.0, 5.5, 12.5);
-      scene.currentLookAt.set(mobileStoreActive() ? scene.currentCameraPos.x : 11.0, 5.3, 0.0);
+      else scene.currentCameraPos.set(WALK_ENTRY_POSITION.x, WALK_ENTRY_POSITION.y, WALK_ENTRY_POSITION.z);
+      scene.currentLookAt.set(mobileStoreActive() ? scene.currentCameraPos.x : WALK_ENTRY_LOOK.x, WALK_ENTRY_LOOK.y, WALK_ENTRY_LOOK.z);
     } else {
       // Raising a shelf-level camera to eye height must preserve its bearing,
       // rather than tilting down toward the shelf's old point of interest.
