@@ -146,7 +146,7 @@ const CSS = `
 #store-touch-controls.visible .st-btn { pointer-events: auto; }
 #store-touch-directions { display: none; position: absolute; left: 16px; bottom: max(24px, env(safe-area-inset-bottom)); grid-template-columns: repeat(3, 56px); gap: 6px; }
 #store-touch-controls.terminal #store-touch-directions { display: grid; }
-#store-touch-directions .st-btn { position: static; min-width: 0; padding: 0 6px; height: 44px; }
+#store-touch-directions .st-btn { position: static; min-width: 0; padding: 0 6px; height: 48px; }
 #store-touch-up { grid-column: 2; }
 #store-touch-left { grid-column: 1; grid-row: 2; }
 #store-touch-down { grid-column: 2; grid-row: 2; }
@@ -167,7 +167,11 @@ const CSS = `
   border: 2px solid #f2e8c9; box-shadow: 0 3px 0 #000; z-index: 2;
 }
 #store-touch-controls.has-carry[data-mode="walk-around"] #store-touch-ok { display: flex; }
-#store-touch-walk { top: max(24px, env(safe-area-inset-top)); right: max(24px, env(safe-area-inset-right)); display: none; }
+#store-touch-walk { top: max(24px, env(safe-area-inset-top)); right: max(112px, calc(env(safe-area-inset-right) + 96px)); display: none; }
+#store-touch-menu { top: max(16px, env(safe-area-inset-top)); right: max(16px, env(safe-area-inset-right)); min-width: 48px; min-height: 48px; height: 48px; }
+#store-touch-controls.terminal #store-touch-menu { display: none; }
+/* Settings on a phone is a real form, not the desk CRT. The d-pad would sit on top of it. */
+body:has(#settings-drawer-overlay.visible:not(.terminal-settings)) #store-touch-controls.terminal #store-touch-directions { display: none; }
 #store-touch-controls:not(.terminal)[data-mode="overview"] #store-touch-walk,
 #store-touch-controls:not(.terminal)[data-mode="browse"] #store-touch-walk,
 #store-touch-controls:not(.terminal)[data-mode="walk-around"] #store-touch-walk { display: flex; }
@@ -298,9 +302,18 @@ export function installStoreTouchControls(callbacks: InputCallbacks, poke: () =>
     bind(button, () => { poke(); fire(); });
     directions.appendChild(button);
   }
+  const menu = document.createElement('button');
+  menu.type = 'button';
+  menu.id = 'store-touch-menu';
+  menu.className = 'st-btn';
+  menu.innerHTML = '<span class="st-label">MENU</span>';
+  menu.setAttribute('aria-label', 'System menu');
+  bind(menu, () => { poke(); callbacks.onPower(); });
+
   root.appendChild(directions);
   root.appendChild(back);
   root.appendChild(ok);
+  root.appendChild(menu);
   (document.getElementById('hud-overlay') ?? document.body).appendChild(root);
 
   // ── Swipe to browse ───────────────────────────────────────────────────

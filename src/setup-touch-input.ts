@@ -15,7 +15,7 @@ export function syncSetupTouchInput(screen: SetupScreen | null, change: (value: 
   if (!box) {
     box = document.createElement('label');
     box.id = 'setup-touch-field';
-    box.style.cssText = 'position:fixed;left:16px;right:16px;bottom:132px;z-index:1200;padding:8px;background:#101010;color:#fff;font:16px sans-serif;border:1px solid #d5ad36;border-radius:8px';
+    box.style.cssText = 'position:fixed;left:max(16px, env(safe-area-inset-left));right:max(16px, env(safe-area-inset-right));top:max(12px, env(safe-area-inset-top));z-index:1300;padding:8px;background:#101010;color:#fff;font:16px sans-serif;border:1px solid #d5ad36;border-radius:8px;touch-action:manipulation';
     const title = document.createElement('span');
     const input = document.createElement('input');
     input.id = 'setup-touch-input';

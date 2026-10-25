@@ -3,6 +3,8 @@ import { isStreamCopyUrl } from './jellyfin';
 import { currentTranscodeSessionId, stopTranscodeSession } from './playback-routing';
 import { keyboardOwnedByControl } from './text-entry-focus';
 import { getSegmentFixLoader } from './hls-segment-fix';
+import { coarseNoHover, installPlayerTouch } from './player-touch';
+import { installPlaybackCast, type CastOffer, type CastRoute, type PlaybackCast } from './playback-cast';
 
 let HlsMod: typeof import('hls.js').default | null = null;
 async function loadHls() {
@@ -163,6 +165,10 @@ export class VideoPlayer {
   private volumeSlider: HTMLInputElement;
   private subtitlesBtn: HTMLElement;
   private fullscreenBtn: HTMLElement;
+  private castBtn: HTMLButtonElement;
+  private playbackCast: PlaybackCast;
+  /** Phone was playing when Chromecast took over, so ending the cast resumes it. */
+  private pausedForCast = false;
   private progressTrack: HTMLElement;
   private progressFilled: HTMLElement;
   private progressBuffered: HTMLElement;
@@ -279,6 +285,7 @@ export class VideoPlayer {
     this.tracksBtn = document.getElementById('vp-tracks')!;
     this.tracksMenu = document.getElementById('vp-tracks-menu')!;
     this.fullscreenBtn = document.getElementById('vp-fullscreen')!;
+    this.castBtn = document.getElementById('vp-cast') as HTMLButtonElement;
     this.progressTrack = document.getElementById('vp-progress')!;
     this.progressFilled = document.getElementById('vp-progress-filled')!;
     this.progressBuffered = document.getElementById('vp-progress-buffered')!;
@@ -294,6 +301,10 @@ export class VideoPlayer {
     this.exitConfirmBtns[1].addEventListener('click', () => this.hideExitConfirm());
 
     this.bindDomEvents();
+    this.playbackCast = installPlaybackCast(this.video, this.castBtn, () => this.castOffer(), {
+      log: (message) => this.log(message),
+      onActive: (active, route) => this.onCastActive(active, route),
+    });
   }
 
   get isOpen(): boolean {
@@ -405,6 +416,7 @@ export class VideoPlayer {
     this.nudgeControls();
     this.startProgressReporting();
     this.startStallWatchdog();
+    this.playbackCast.sync();
   }
 
   reveal(): void {
@@ -569,6 +581,12 @@ export class VideoPlayer {
     // Flip _isOpen before teardown so the resulting <video> error event (from
     // clearing src) isn't mistaken for a playback failure and retried.
     this._isOpen = false;
+    // Drop the resume flag before ending the cast, or the phone would start
+    // playing again for a frame as the player closes. Ending the session
+    // does not by itself stop the server encode; the next line does, and
+    // that is what makes the television go quiet.
+    this.pausedForCast = false;
+    this.playbackCast.stop();
     // Back/exit must not leave ffmpeg encoding for a player that no longer
     // exists — the server would keep the job alive until its idle timeout,
     // and the next open() would stack a second encode on top of it.
@@ -635,7 +653,7 @@ export class VideoPlayer {
     // arrow-key focus appears to skip/teleport between buttons.
     return [
       this.backBtn, this.back10Btn, this.playPauseBtn, this.fwd10Btn,
-      this.muteBtn, this.tracksBtn, this.subtitlesBtn, this.fullscreenBtn,
+      this.muteBtn, this.tracksBtn, this.subtitlesBtn, this.castBtn, this.fullscreenBtn,
     ].filter((el) => !el.hasAttribute('hidden'));
   }
 
@@ -1143,6 +1161,27 @@ export class VideoPlayer {
     // Fullscreen.
     this.fullscreenBtn.addEventListener('click', () => this.toggleFullscreen());
     document.addEventListener('fullscreenchange', () => this.updateFullscreenUI());
+    this.video.addEventListener('webkitbeginfullscreen', () => this.updateFullscreenUI());
+    this.video.addEventListener('webkitendfullscreen', () => this.updateFullscreenUI());
+
+    installPlayerTouch(this.overlay, this.progressTrack, {
+      seekRatio: (ratio) => {
+        const dur = this.totalDurationSeconds();
+        if (!isFinite(dur) || dur <= 0) return;
+        this.seekTo(ratio * dur);
+        this.nudgeControls();
+      },
+      show: () => this.nudgeControls(),
+      hide: () => {
+        if (this.isExitConfirmOpen || this.isMenuOpen()) return;
+        if (this.hideTimer !== null) {
+          clearTimeout(this.hideTimer);
+          this.hideTimer = null;
+        }
+        this.overlay.classList.add('controls-hidden');
+      },
+      controlsHidden: () => this.overlay.classList.contains('controls-hidden'),
+    });
 
     // Extra shortcuts not already routed through the global remote/keyboard
     // system (space/arrows/escape are wired in main.ts via InputManager).
@@ -1176,6 +1215,7 @@ export class VideoPlayer {
       this.durationEl.innerText = formatTime(this.totalDurationSeconds());
       this.updateProgressUI();
       this.setupSubtitlesIfAvailable();
+      this.playbackCast.sync();
     });
     this.video.addEventListener('timeupdate', () => this.updateProgressUI());
     this.video.addEventListener('progress', () => this.updateBufferedUI());
@@ -1290,6 +1330,20 @@ export class VideoPlayer {
   }
 
   private toggleFullscreen(): void {
+    // iOS Safari ignores requestFullscreen on a div. The video element's
+    // own fullscreen is the one that works, and only a phone should take it:
+    // desktop Safari keeps the overlay so the custom controls stay in the
+    // fullscreen element.
+    const webkit = this.video as HTMLVideoElement & {
+      webkitEnterFullscreen?: () => void;
+      webkitExitFullscreen?: () => void;
+      webkitDisplayingFullscreen?: boolean;
+    };
+    if (coarseNoHover() && typeof webkit.webkitEnterFullscreen === 'function') {
+      if (webkit.webkitDisplayingFullscreen) webkit.webkitExitFullscreen?.();
+      else webkit.webkitEnterFullscreen();
+      return;
+    }
     if (!document.fullscreenElement) {
       this.overlay.requestFullscreen?.().catch(() => {});
     } else {
@@ -1298,7 +1352,8 @@ export class VideoPlayer {
   }
 
   private updateFullscreenUI(): void {
-    const isFullscreen = document.fullscreenElement === this.overlay;
+    const webkitFs = (this.video as HTMLVideoElement & { webkitDisplayingFullscreen?: boolean }).webkitDisplayingFullscreen;
+    const isFullscreen = document.fullscreenElement === this.overlay || !!webkitFs;
     this.fullscreenBtn.classList.toggle('is-fullscreen', isFullscreen);
     this.fullscreenBtn.setAttribute('aria-label', isFullscreen ? 'Exit fullscreen' : 'Fullscreen');
   }
@@ -1532,6 +1587,38 @@ export class VideoPlayer {
     this.sourceIndex = 0;
     this.setSpinner(true);
     this.tryCurrentSource();
+    this.playbackCast.sync();
+  }
+
+  /** What a television can fetch for the title currently open. */
+  private castOffer(): CastOffer | null {
+    if (!this.opts) return null;
+    const direct = this.sources.find((source) => !source.isHls)?.src ?? this.opts.staticSrc;
+    const hls = this.sources.find((source) => source.isHls)?.src ?? this.opts.hlsSrc;
+    return {
+      directUrl: direct,
+      hlsUrl: hls,
+      directPlayable: this.opts.directPlayable && this.sources.some((source) => !source.isHls),
+      title: this.opts.title,
+      currentTime: this.currentAbsoluteSeconds(),
+    };
+  }
+
+  private onCastActive(active: boolean, route: CastRoute): void {
+    // AirPlay and Remote Playback use this element. Pausing first would hand
+    // the television a stopped picture. Chromecast opens the URL on its own.
+    if (route !== 'chromecast') return;
+    if (active) {
+      if (!this.video.paused) {
+        this.pausedForCast = true;
+        this.video.pause();
+      }
+      return;
+    }
+    if (this.pausedForCast && this._isOpen) {
+      this.pausedForCast = false;
+      void this.video.play().catch(() => {});
+    }
   }
 
   /** Seek to an ABSOLUTE position in the item's full runtime — the single

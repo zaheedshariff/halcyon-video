@@ -11,6 +11,7 @@ import { retailAudio } from './audio';
 import { isPublicDemo } from './demo-mode';
 import { mobileStoreActive } from './mobile-store';
 import { compileProgramsInStages, prepareStaticTextures, shadowDepthProgramViews, submitPostPrograms, yieldForPrograms } from './program-warmup';
+import { WALK_ENTRY_POSITION, walkEntryPitch, walkEntryYaw, walkLookHeadings, walkWarmupCamera } from './walk-entry-warmup';
 
 const stagedInitialRooms = new WeakSet<StoreScene>();
 const preparing = new WeakSet<StoreScene>();
@@ -33,6 +34,7 @@ export async function prepareInitialViewPrograms(scene: StoreScene): Promise<voi
       await compileProgramsInStages(scene.renderer, scene.scene, scene.camera,
         scene.composer?.readBuffer ?? null, scene.programWarmupController.signal, roots);
     } finally { roots.children = []; }
+    await prepareWalkEntryPrograms(scene);
     return;
   }
   stagedInitialRooms.add(scene);
@@ -51,6 +53,10 @@ export async function prepareInitialViewPrograms(scene: StoreScene): Promise<voi
       scene.composer?.readBuffer ?? null, scene.programWarmupController.signal, roots,
       (_fraction, detail) => updateStoreLoading(84, detail));
   } finally { roots.children = []; }
+  // The opening compile only covered the current camera. Walk mode looks
+  // somewhere else a moment later (or is already that pose on a phone), and
+  // those programs used to link on the first frames.
+  await prepareWalkEntryPrograms(scene);
 }
 
 export async function warmupRuntimePrograms(scene: StoreScene) {
@@ -93,6 +99,8 @@ export async function warmupRuntimePrograms(scene: StoreScene) {
       if (background) { await prepareRemainingRoom(); return; }
       await compileProgramsInStages(scene.renderer, scene.scene, scene.camera,
         scene.composer?.readBuffer ?? null, signal);
+      await prepareStaticTextures(scene.renderer, scene.scene, signal);
+      await prepareWalkEntryPrograms(scene);
       return;
     }
     const warm = createProgramWarmupMaterials(movie, firstAnimated, firstSeries);
@@ -178,6 +186,9 @@ export async function warmupRuntimePrograms(scene: StoreScene) {
     scene.scene.remove(warmScene);
     geo.dispose();
     geo = undefined;
+    // Maps the overview never drew are still on the GPU's to-do list. Upload
+    // them before the boot overlay drops, not on the first step into the aisle.
+    await prepareStaticTextures(scene.renderer, scene.scene, signal);
     // Retain the dummy materials: disposing their last reference deletes the
     // warmed GL programs and makes the first detailed inspection compile again.
     retailAudio.prewarm(); // first sound otherwise pays AudioContext setup mid-keypress
@@ -202,6 +213,7 @@ export async function warmupRuntimePrograms(scene: StoreScene) {
       }
     }
     scene.hideHeroCases();
+    await prepareWalkEntryPrograms(scene);
     console.log(`[warmup] hero material programs drawn+compiled in ${(performance.now() - t0).toFixed(0)}ms`);
   } catch (e) {
     if (!signal.aborted) console.warn('[warmup] runtime program warmup failed:', e);
@@ -235,6 +247,96 @@ export async function prepareDetailModel(scene: StoreScene, model: THREE.Group, 
   await compileProgramsInStages(scene.renderer, scene.scene, scene.camera,
     scene.composer?.readBuffer ?? null, signal, model, undefined, backgroundOptions(scene, signal));
   await prepareStaticTextures(scene.renderer, model, signal, backgroundOptions(scene, signal).beforeWork);
+}
+
+interface LodLevelState { lod: THREE.LOD; visible: boolean[] }
+
+function captureLod(root: THREE.Object3D): LodLevelState[] {
+  const saved: LodLevelState[] = [];
+  root.traverse((object) => {
+    const lod = object as THREE.LOD;
+    if (!lod.isLOD) return;
+    saved.push({ lod, visible: lod.children.map((child) => child.visible) });
+  });
+  return saved;
+}
+
+function restoreLod(saved: LodLevelState[]): void {
+  for (const shot of saved) {
+    shot.lod.children.forEach((child, index) => {
+      if (index < shot.visible.length) child.visible = shot.visible[index];
+    });
+  }
+}
+
+function poseLod(root: THREE.Object3D, camera: THREE.Camera): void {
+  root.traverse((object) => {
+    const lod = object as THREE.LOD;
+    if (lod.isLOD) lod.update(camera);
+  });
+}
+
+/** Meshes a walk pose can actually see, including instanced shelves in that
+ * frustum. The opening-view helper keeps every instance in the store, which
+ * is the right conservative choice for the first frame and the wrong cost for
+ * four extra look directions on a phone. */
+function walkViewObjects(root: THREE.Object3D, camera: THREE.Camera): THREE.Object3D[] {
+  root.updateMatrixWorld(true);
+  camera.updateMatrixWorld(true);
+  const frustum = new THREE.Frustum().setFromProjectionMatrix(
+    new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+  const objects: THREE.Object3D[] = [];
+  root.traverse((object) => {
+    const mesh = object as THREE.Mesh;
+    if (!mesh.material || !object.visible) return;
+    if (!object.layers.test(camera.layers)) return;
+    for (let parent: THREE.Object3D | null = object.parent; parent; parent = parent.parent) {
+      if (!parent.visible) return;
+    }
+    const sprite = object as THREE.Sprite;
+    const inView = !object.frustumCulled || (sprite.isSprite
+      ? frustum.intersectsSprite(sprite)
+      : frustum.intersectsObject(object));
+    if (inView) objects.push(object);
+  });
+  return objects;
+}
+
+/** Compile and upload the free-roam entry view, then a full look-around.
+ * Level-of-detail nodes only build the level the compiling camera can see,
+ * so an overview warmup leaves the walk distance's programs for the first
+ * steps. The live camera is not moved, and detail levels are put back. */
+async function prepareWalkEntryPrograms(scene: StoreScene): Promise<void> {
+  const signal = scene.programWarmupController.signal;
+  if (signal.aborted) return;
+  const walking = scene.isWalkAroundMode;
+  const position = walking ? scene.camera.position : WALK_ENTRY_POSITION;
+  const pitch = walking ? scene.camera.rotation.x : walkEntryPitch();
+  const baseYaw = walking ? scene.camera.rotation.y : walkEntryYaw();
+  const aspect = scene.camera.aspect > 0 ? scene.camera.aspect : 16 / 9;
+  const saved = captureLod(scene.scene);
+  try {
+    for (const yaw of walkLookHeadings(baseYaw)) {
+      if (signal.aborted) return;
+      restoreLod(saved);
+      const camera = walkWarmupCamera(
+        { x: position.x, y: position.y, z: position.z },
+        yaw, pitch, aspect,
+      );
+      poseLod(scene.scene, camera);
+      const roots = new THREE.Group();
+      roots.children = walkViewObjects(scene.scene, camera);
+      try {
+        await compileProgramsInStages(scene.renderer, scene.scene, camera,
+          scene.composer?.readBuffer ?? null, signal, roots);
+        await prepareStaticTextures(scene.renderer, roots, signal);
+      } finally {
+        roots.children = [];
+      }
+    }
+  } finally {
+    restoreLod(saved);
+  }
 }
 
 function backgroundOptions(scene: StoreScene, signal: AbortSignal) {
