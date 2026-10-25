@@ -3,6 +3,7 @@ import { isStreamCopyUrl } from './jellyfin';
 import { currentTranscodeSessionId, stopTranscodeSession } from './playback-routing';
 import { keyboardOwnedByControl } from './text-entry-focus';
 import { getSegmentFixLoader } from './hls-segment-fix';
+import { coarseNoHover, installPlayerTouch } from './player-touch';
 
 let HlsMod: typeof import('hls.js').default | null = null;
 async function loadHls() {
@@ -1143,6 +1144,27 @@ export class VideoPlayer {
     // Fullscreen.
     this.fullscreenBtn.addEventListener('click', () => this.toggleFullscreen());
     document.addEventListener('fullscreenchange', () => this.updateFullscreenUI());
+    this.video.addEventListener('webkitbeginfullscreen', () => this.updateFullscreenUI());
+    this.video.addEventListener('webkitendfullscreen', () => this.updateFullscreenUI());
+
+    installPlayerTouch(this.overlay, this.progressTrack, {
+      seekRatio: (ratio) => {
+        const dur = this.totalDurationSeconds();
+        if (!isFinite(dur) || dur <= 0) return;
+        this.seekTo(ratio * dur);
+        this.nudgeControls();
+      },
+      show: () => this.nudgeControls(),
+      hide: () => {
+        if (this.isExitConfirmOpen || this.isMenuOpen()) return;
+        if (this.hideTimer !== null) {
+          clearTimeout(this.hideTimer);
+          this.hideTimer = null;
+        }
+        this.overlay.classList.add('controls-hidden');
+      },
+      controlsHidden: () => this.overlay.classList.contains('controls-hidden'),
+    });
 
     // Extra shortcuts not already routed through the global remote/keyboard
     // system (space/arrows/escape are wired in main.ts via InputManager).
@@ -1290,6 +1312,20 @@ export class VideoPlayer {
   }
 
   private toggleFullscreen(): void {
+    // iOS Safari ignores requestFullscreen on a div. The video element's
+    // own fullscreen is the one that works, and only a phone should take it:
+    // desktop Safari keeps the overlay so the custom controls stay in the
+    // fullscreen element.
+    const webkit = this.video as HTMLVideoElement & {
+      webkitEnterFullscreen?: () => void;
+      webkitExitFullscreen?: () => void;
+      webkitDisplayingFullscreen?: boolean;
+    };
+    if (coarseNoHover() && typeof webkit.webkitEnterFullscreen === 'function') {
+      if (webkit.webkitDisplayingFullscreen) webkit.webkitExitFullscreen?.();
+      else webkit.webkitEnterFullscreen();
+      return;
+    }
     if (!document.fullscreenElement) {
       this.overlay.requestFullscreen?.().catch(() => {});
     } else {
@@ -1298,7 +1334,8 @@ export class VideoPlayer {
   }
 
   private updateFullscreenUI(): void {
-    const isFullscreen = document.fullscreenElement === this.overlay;
+    const webkitFs = (this.video as HTMLVideoElement & { webkitDisplayingFullscreen?: boolean }).webkitDisplayingFullscreen;
+    const isFullscreen = document.fullscreenElement === this.overlay || !!webkitFs;
     this.fullscreenBtn.classList.toggle('is-fullscreen', isFullscreen);
     this.fullscreenBtn.setAttribute('aria-label', isFullscreen ? 'Exit fullscreen' : 'Fullscreen');
   }

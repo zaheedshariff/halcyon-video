@@ -103,6 +103,27 @@ const HELP_SECTIONS: HelpSection[] = [
     ],
   },
   {
+    title: 'Phone — drag, tap, and the on-screen buttons',
+    rows: [
+      {
+        id: 'phone-look', control: 'Drag · stick', action: 'Look and walk',
+        hint: 'Drag the picture to look. The stick walks.',
+      },
+      {
+        id: 'phone-tap', control: 'Tap a tape', action: 'Pick it up',
+        hint: 'Tap OK to take it to the counter and play.',
+      },
+      {
+        id: 'phone-menu', control: 'MENU', action: 'System menu',
+        hint: 'Same page as the P key: settings, sleep, sign out.',
+      },
+      {
+        id: 'phone-walk', control: 'WALK', action: 'Stroll or browse',
+        hint: 'WALK switches between free roam and the shelves.',
+      },
+    ],
+  },
+  {
     title: 'Keyboard extras',
     rows: [
       {

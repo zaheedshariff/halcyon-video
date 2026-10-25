@@ -1649,7 +1649,7 @@ function openSettingsDrawer(page: SettingGroup | 'Controls' | null = null, fromT
     }
   }
 
-  settingsSurface.open(getSetting<string>('bb_render_mode') === 'flat' ? null : storeScene, fromTerminal);
+  settingsSurface.open(getSetting<string>('bb_render_mode') === 'flat' || isTouchInputActive() ? null : storeScene, fromTerminal);
   ui.isSettingsDrawerOpen = true;
   settingsPendingRebuild = false;
   settingsPendingReload = false;
@@ -4127,7 +4127,7 @@ async function main() {
       }
     },
     onPower: () => {
-      if (storeScene?.isWalkAroundMode) return;
+      if (storeScene?.isWalkAroundMode && !isTouchInputActive()) return;
       // Same hard-stop the power key gives the real player.
       if (isDemoPlaybackOpen()) { closeDemoPlaybackOverlay(); return; }
       if (videoPlayer?.isOpen) { videoPlayer.close(); return; }

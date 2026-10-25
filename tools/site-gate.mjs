@@ -293,14 +293,15 @@ function pageShell(title, inner) {
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
 <title>${escapeHtml(title)}</title>
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
   body {
-    margin: 0; min-height: 100vh; display: grid; place-items: center;
+    margin: 0; min-height: 100vh; min-height: 100dvh; display: grid; place-items: center;
+    padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
     background:
       radial-gradient(ellipse at 50% -10%, rgba(255,204,0,.18), transparent 46%),
       linear-gradient(180deg, #071a4a 0%, #000714 58%, #1a0c08 100%);
@@ -329,13 +330,14 @@ function pageShell(title, inner) {
   label span { letter-spacing: 0; text-transform: none; color: #b3aa98; }
   input {
     width: 100%; padding: 12px; border: 2px solid #31477f; background: #070b16; color: #fff;
-    font: 16px/1.2 "Trebuchet MS", sans-serif;
+    font: 16px/1.2 "Trebuchet MS", sans-serif; min-height: 48px;
   }
   input:focus { outline: 2px solid #ffcc00; border-color: #ffcc00; }
   button, .back {
     display: block; width: 100%; margin-top: 18px; border: 0; cursor: pointer; text-align: center;
-    background: #ffcc00; color: #1a1200; text-decoration: none;
+    background: #ffcc00; color: #1a1200; text-decoration: none; touch-action: manipulation;
     font-family: Impact, "Arial Black", sans-serif; letter-spacing: .12em; font-size: 22px; padding: 12px;
+    min-height: 48px;
   }
   button:hover, .back:hover { background: #ffe066; }
   .error { margin-top: 14px; padding: 10px 12px; background: #3c1222; color: #ffd5e0; }
