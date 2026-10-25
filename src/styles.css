@@ -3116,10 +3116,13 @@ html, body {
 #vp-fullscreen.is-fullscreen .vp-icon-fs-enter { display: none; }
 #vp-fullscreen.is-fullscreen .vp-icon-fs-exit { display: block; }
 
-#vp-subtitles.is-active {
+#vp-subtitles.is-active,
+#vp-cast.is-casting {
   color: var(--bb-yellow);
   background: rgba(255, 204, 0, 0.16);
 }
+
+#vp-cast[hidden] { display: none !important; }
 
 /* Remote/keyboard focus ring for control-bar navigation (arrow keys). */
 .vp-focused {
