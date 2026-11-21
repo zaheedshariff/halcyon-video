@@ -8,8 +8,7 @@ import type { Movie } from './providers/media-source-provider';
 import { CASE_MEDIUM, posterPixelCache, createProgramWarmupMaterials } from './video-case';
 import { isWhiteClamshell } from './packaging-formats';
 import { retailAudio } from './audio';
-import { isPublicDemo } from './demo-mode';
-import { mobileStoreActive } from './mobile-store';
+import { fastBootReveal } from './fast-boot';
 import { compileProgramsInStages, prepareStaticTextures, shadowDepthProgramViews, submitPostPrograms, yieldForPrograms } from './program-warmup';
 
 const stagedInitialRooms = new WeakSet<StoreScene>();
@@ -59,7 +58,7 @@ export async function warmupRuntimePrograms(scene: StoreScene) {
   const signal = scene.programWarmupController.signal;
   // Explicit High keeps the complete depth-of-field/hero draw preparation.
   // Automatic phone tiers can prepare inspection materials after room entry.
-  const background = (isPublicDemo || mobileStoreActive()) && scene.effectiveQuality !== 'high';
+  const background = fastBootReveal();
   const options = background ? backgroundOptions(scene, signal) : undefined;
   const instancedProbes: THREE.InstancedMesh[] = [];
   let firstInspectionProbe: THREE.InstancedMesh | undefined;

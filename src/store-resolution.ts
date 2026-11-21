@@ -78,7 +78,7 @@ export function updateDynamicResolution(
   // 0.05 per two good seconds, and cannot climb at all in the VIDEO tier
   // (the early return above), so one boot could soften the store for the rest
   // of the session. Skip the window entirely while the queue is draining.
-  if (pendingTextureUploads() > 0) {
+  if (pendingTextureUploads() > 0 || time < scene.postRevealTextureGraceUntil) {
     resetScalerWindow(scene, time);
     return;
   }

@@ -17,7 +17,7 @@ import { shelfLeanAngle, lowerShelfProjection, LOWER_BACKREST_HEIGHT } from './s
 import { activeStoreFormat } from './store-format';
 import { updateBackstock, forgetBackstock } from './case-backstock';
 const caseModelSubscriptions = new WeakMap<StoreScene, () => void>();
-import { isPublicDemo } from './demo-mode';
+import { fastBootReveal } from './fast-boot';
 import { Movie } from './jellyfin';
 import { posterQueue, CASE_MEDIUM, CASE_HEIGHT, CASE_DEPTH, textureArrayManager, createClonedCaseGeometry, getGlobalFrontMaterials, getGlobalBackMaterials, updateGlobalMaterialsEnvMap, leftmostColorCache, posterPixelCache, reflectionProbes, isGlobalMaterial, lowResCache, gameShapeKey, gameDimsForShape, BLURAY_RENTAL_DIMS, gameCaseDims, gameRentalDims, rentalBottomLift, rentalBoxDepth, rentalBoxHeight, beginRebuildDrain, SERIES_DEPTH_MULT } from './video-case';
 import { AISLE_SHELF_HEIGHTS, WALL_SHELF_HEIGHTS, NR_WALL_SLOPE, LEAN_ANGLE, STAGGER_OFFSET, UNIT_SIDE_CAPACITY, BACK_WALL_UNIT_IDX, sideEntrySlot, COPY_X_JITTER_RANGE, unitDepthAtHeight, extraCopiesCount, isUnstockedTitle, seededRandom01, MovieSlot } from './store-layout';
@@ -995,7 +995,7 @@ export async function buildAllMovieBoxes(scene: StoreScene) {
   // Public streaming covers consume the early prefetch here without gating
   // entry. Local boots retain their non-streaming texture readiness gate.
   const allSlots = Array.from(scene.slotsByPosition.values());
-  const gatedSlots = allSlots.filter(slot => (isPublicDemo || mobileStoreActive() || !slot.movie.streaming) &&
+  const gatedSlots = allSlots.filter(slot => (fastBootReveal() || !slot.movie.streaming) &&
     (slot.restingX - OVERVIEW_POS.x) ** 2 + (slot.restingZ - OVERVIEW_POS.z) ** 2 < 400).slice(0, 96);
   // Nearby shelf faces lead the download queue. Copies share one decode.
   if (mobileStoreActive()) {
@@ -1012,7 +1012,7 @@ export async function buildAllMovieBoxes(scene: StoreScene) {
   // no-reload rebuild. It matters most at catalog scale: a 7k-title store
   // otherwise reveals a room of bare rental shells that paint in over tens of
   // seconds. Self-clearing when the queue empties.
-  if (!(isPublicDemo || mobileStoreActive())) beginRebuildDrain();
+  if (!fastBootReveal()) beginRebuildDrain();
   scene.onTextureLoadProgress?.(0, total);
   scene.texturesReadyPromise = Promise.all(gatedSlots.map(slot => new Promise<void>(resolve => {
     slot.loadShelfDetails(0, () => {

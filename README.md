@@ -254,6 +254,13 @@ npm install
 npm run dev
 ```
 
+`npm run dev` turns on **fast boot** automatically: the overlay drops sooner and
+shader or poster work finishes in the background (same idea as the hosted store).
+Production builds keep the classic wait unless you enable **Settings →
+Performance → Fast Boot**, or set `VITE_FAST_BOOT=1` at build time. In DevTools
+you get a `[boot] stage timing` table after entry. Use `npm run preview` when you
+want perf closer to a release build.
+
 The opening-day terminal can connect Jellyfin, Plex, or Emby, select streaming
 services, or open the store empty and configure it later at the manager CRT.
 

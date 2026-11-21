@@ -46,6 +46,7 @@ const SKIP_KEYS = new Set([
   'bb_motion_sharp',
   'bb_mirrors',
   'bb_partial_composite',
+  'bb_fast_boot',
   'bb_overflow',
   'bb_poster_cache_mb',
   'bb_vr_render_scale',

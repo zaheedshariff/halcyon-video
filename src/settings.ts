@@ -1076,6 +1076,16 @@ export function registerCoreSettings(): void {
   });
 
   registerSetting({
+    key: 'bb_fast_boot',
+    label: 'Fast Boot',
+    kind: 'toggle',
+    group: 'Performance',
+    default: false,
+    applyMode: 'rebuild-scene',
+    hint: 'Reveal the store before nearby posters and full shader warmup finish; may hitch once when browsing. On by default during npm run dev.',
+  });
+
+  registerSetting({
     key: 'bb_fps_cap',
     label: 'FPS Cap',
     kind: 'cycle',

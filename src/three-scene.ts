@@ -29,6 +29,7 @@ import { paintStoreLoading } from './store-loading';
 import { installDirectLightVisibility } from './direct-light-visibility';
 installDirectLightVisibility();
 import { isPublicDemo } from './demo-mode';
+import { fastBootReveal } from './fast-boot';
 import { Movie, JellyfinLibrary, Episode } from './jellyfin';
 import { assetUrl } from './asset-url';
 import {
@@ -397,6 +398,8 @@ export class StoreScene {
   // ~24fps and IDLE frames render nothing, so mixing either into this window
   // would misread throttling as a slow GPU and needlessly downscale.
   public resScaleFrames = 0;
+  /** Ignores dynamic-res downscales while posters stream after a fast-boot reveal. */
+  public postRevealTextureGraceUntil = 0;
   public resScaleWindowStart = performance.now();
   public resScaleGoodStreak = 0; // consecutive good-fps seconds before stepping up (avoids oscillation)
   // Longest frame in the in-flight scaler window, and the previous window
@@ -1475,10 +1478,10 @@ export class StoreScene {
     // (Floor plan already computed above, before the NR wall derivation.)
 
     this.initThree();
-    if ((isPublicDemo || mobileStoreActive()) && this.effectiveQuality !== 'high') {
+    if (fastBootReveal() && this.effectiveQuality !== 'high') {
       this.detailLoads = new DeferredModelLoads(this.programWarmupController.signal);
     }
-    if (isPublicDemo || mobileStoreActive()) {
+    if (fastBootReveal()) {
       // A settings rebuild may preserve case caches from the outgoing scene.
       // Until this room's deferred bake, use its live bootstrap environment
       // instead of keeping references to the previous room's disposed probes.
@@ -1510,7 +1513,7 @@ export class StoreScene {
     // Public entry uses the existing inexpensive room environment until the
     // visitor pauses. The full bounce/probe bake used to compile the whole
     // room several times before the first interactive frame.
-    if (!(isPublicDemo || mobileStoreActive())) {
+    if (!fastBootReveal()) {
       const prepare = () => compileProgramsInStages(this.renderer, this.scene, this.camera,
         this.composer?.readBuffer ?? null, this.programWarmupController.signal);
       await this.outdoor.bakeEnvironmentInStages(prepare);
@@ -1600,15 +1603,16 @@ export class StoreScene {
 
     // The public overview needs the room's shaders, not dry-run inspections.
     // Inspection variants prepare after main.ts has wired input and revealed it.
-    if (mobileStoreActive() && this.effectiveQuality !== 'high') {
-      // Keep original textured, lit materials. Draw only the opening view;
-      // off-camera program preparation must not hold the entrance closed.
-      await programWarmup.prepareInitialViewPrograms(this);
-      await paintStoreLoading(80);
-      this.animate();
-      this.onConsoleLog("[System] 3D Store rendering active in Library Select mode.", "system");
-      return;
-    } else if (isPublicDemo && this.effectiveQuality !== 'high') {
+    if (fastBootReveal()) {
+      if (mobileStoreActive() && this.effectiveQuality !== 'high') {
+        // Keep original textured, lit materials. Draw only the opening view;
+        // off-camera program preparation must not hold the entrance closed.
+        await programWarmup.prepareInitialViewPrograms(this);
+        await paintStoreLoading(80);
+        this.animate();
+        this.onConsoleLog("[System] 3D Store rendering active in Library Select mode.", "system");
+        return;
+      }
       await programWarmup.prepareInitialViewPrograms(this);
     } else {
       await this.warmupRuntimePrograms();
@@ -2173,7 +2177,8 @@ export class StoreScene {
       };
       const aoBase = 1.4; // must track n8aoPass.configuration.intensity above (the enabled/blend setters reset to aoBase * blend)
       const aoCtl = {
-        motionSafe: true,
+        // High keeps N8AO while walking; medium/low use the walk gate + beauty path.
+        motionSafe: this.effectiveQuality === 'high',
         _on: true,
         _blend: 1,
         get enabled() { return this._on; },

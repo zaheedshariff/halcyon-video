@@ -168,7 +168,13 @@ import type { CandyRow } from './fixtures/period-fixtures';
 import { getCandyDeliveryAdapter } from './candy-delivery';
 import { loadOperatorDefaults } from './operator-defaults';
 import { scheduleConfigPush, flushConfigPush } from './store-config-sync';
-import { isDemoMode, isPublicDemo } from './demo-mode';
+import { isDemoMode } from './demo-mode';
+import {
+  fastBootReveal,
+  flushBootStageTable,
+  markBootStage,
+  POST_REVEAL_TEXTURE_GRACE_MS,
+} from './fast-boot';
 import { startScreensaverAnimation, stopScreensaverAnimation } from './screensaver';
 import { buildDemoDiscovery, makeSyntheticEpisodes, demoPoster } from './demo-library';
 import { EMPTY_STAFF_PICKS, loadStaffPicks, StaffPicks } from './staff-picks-loader';
@@ -2576,7 +2582,9 @@ async function initializeStoreScene(preservePosterCache = false) {
     // never calls initializeStoreScene() at all. No-ops instantly when an
     // explicit bb_quality is set or a cached calibration still matches.
     const { calibrateQualityIfNeeded, armQualityBackstop } = await import('./quality-calibrate');
+    markBootStage('calibrate:start');
     await calibrateQualityIfNeeded();
+    markBootStage('calibrate:done');
 
     await paintStoreLoading(25, 'Building the room');
     const { StoreScene } = await import('./three-scene');
@@ -2590,6 +2598,7 @@ async function initializeStoreScene(preservePosterCache = false) {
     // that heavy startup work, so recovery must already be listening.
     installContextLossRecovery(scene.renderer.domElement);
     try { await scene.ready; } catch (error) { scene.destroy(); throw error; }
+    markBootStage('scene.ready');
     updateStoreLoading(85, 'Preparing the entrance');
     armQualityBackstop();
     let lastLoggedPct = -1;
@@ -2789,7 +2798,7 @@ async function initializeStoreScene(preservePosterCache = false) {
 
     // Keep the existing splash over the counter's crude loading solids. Covers
     // still stream progressively in the public store; the model grace is bounded.
-    ((isPublicDemo || mobileStoreActive()) ? Promise.resolve() : scene.texturesReadyPromise).then(async () => {
+    (fastBootReveal() ? Promise.resolve() : scene.texturesReadyPromise).then(async () => {
       document.getElementById('boot-overlay')?.classList.add('preparing-models');
       await paintStoreLoading(92, 'Finishing the counter');
       await waitForStartupModel(scene.entrance?.whenCounterModelReady());
@@ -2847,17 +2856,22 @@ async function initializeStoreScene(preservePosterCache = false) {
       updateBrowseHUDVisibility();
       aisleIndicatorInterval = window.setInterval(updateBrowseHUDVisibility, 200);
 
-      logToConsole((isPublicDemo || mobileStoreActive()) ? '[System] Store ready. Artwork continues loading.' : '[System] All textures loaded. Store ready.', 'system');
+      logToConsole(fastBootReveal() ? '[System] Store ready. Artwork continues loading.' : '[System] All textures loaded. Store ready.', 'system');
       initSharedPlace(scene, isSetupPending(), () => storeScene, () => ui.isLoginOpen || textEntryHasFocus(), showClerkToast);
       // Opening day (#41): dock the counter CRT's NEW STORE SETUP before the
       // overlay drops, so the player wakes already at the terminal.
       maybeOpenSetupTerminal();
+      if (fastBootReveal()) {
+        scene.postRevealTextureGraceUntil = performance.now() + POST_REVEAL_TEXTURE_GRACE_MS;
+      }
       hideBootOverlay();
+      markBootStage('overlay:hidden');
+      flushBootStageTable('initializeStoreScene');
       // Restore detailed fixtures progressively, one idle load at a time.
-      // Full-room reflection bakes still stay off the phone startup path.
-      if (isPublicDemo || mobileStoreActive()) {
+      // Full-room reflection bakes still stay off the fast-boot path.
+      if (fastBootReveal()) {
         void scene.warmupRuntimePrograms().finally(() => scene.detailLoads?.release())
-          .catch(error => console.warn('[warmup] Hosted preparation failed:', error));
+          .catch(error => console.warn('[warmup] Fast-boot background preparation failed:', error));
       }
       // You've just come in through the doors — ring the entry chime. (May stay
       // silent if the browser hasn't seen a user gesture yet; that's fine.)
